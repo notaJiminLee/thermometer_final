@@ -42,7 +42,7 @@ def make_vis_stream(display_width=1088, display_height=816):
         flip_method=2,
     )
     
-    return cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+    return cv2.VideoCapture(0)###pipeline, cv2.CAP_GSTREAMER)
 
 
 class GPUThread(Thread):
