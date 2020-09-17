@@ -6,6 +6,9 @@ import itertools
 
 import cv2
 import time
+import os
+from subprocess import call
+import requests
 
 from ir import IRThread
 from vis import GPUThread
@@ -16,12 +19,15 @@ from vis.utils import draw_boxes as overlay_vis_bboxes
 def exit_handler():
     print("exit handler called")
     gpu_thread.stop()
-    ###ir_thread.stop()
-    
     gpu_thread.join()
-    ###ir_thread.join()
     
     cv2.destroyAllWindows()
+
+def save_img(url):
+    wtime = time.strftime('%y%m%d%H%M%S', time.localtime(time.time()))
+    cv2.imwrite(os.path.join('./image', wtime + '.jpg'), vis_frame_w_overlay)
+    files={'file':open('./image/' + wtime + '.jpg', 'rb')}
+    r=requests.post(url, files=files, params={'temp':'36.5', 'webpath':'http://34.64.149.18:5051/images/' + wtime + '.jpg'})
 
 if __name__ == "__main__":
     
@@ -34,61 +40,58 @@ if __name__ == "__main__":
     LOG_DIR = "logs"
 
     APP_NAME = "AI Thermometer"
-    IR_WIN_NAME = APP_NAME + ": IR frame"
-    VIS_WIN_NAME = APP_NAME + ": VIS frame" 
+    VIS_WIN_NAME = APP_NAME + ": VIS frame"  # window name
 
 
     gpu_thread = GPUThread(frame_size=WIN_SIZE)
-    gpu_thread.start()
-
-    ###ir_thread = IRThread()
-    ###ir_thread.start()
+    gpu_thread.start()  # get vis frame start
 
     executor = ThreadPoolExecutor(max_workers=4)
 
-    cv2.namedWindow(VIS_WIN_NAME)
-    cv2.namedWindow(IR_WIN_NAME)
-    cv2.moveWindow(IR_WIN_NAME, WIN_SIZE[0], 0)
-    
+    cv2.namedWindow(VIS_WIN_NAME)  # create window
+
+    url='http://34.64.149.18:5051/upload'
+    nodetecting = 0
+    saveflag = 0
+
     try:
-        while gpu_thread.frame is None:
+        while gpu_thread.frame is None:  # can't get vis frame
             print("Waiting for RGB frames")
             time.sleep(1)
 
-        ###while ir_thread.frame is None:
-        ###    print("Waiting for IR frames")
-        ###    time.sleep(1)
-
         # main loop
         for i in itertools.count(start=0, step=1):
+            
 
             time_start = time.monotonic()
 
-            ###ir_frame_w_overlay = overlay_ir_bboxes(ir_thread.frame, ir_thread.bboxes)
-            vis_frame_w_overlay = overlay_vis_bboxes(gpu_thread.frame, gpu_thread.detections)
+	    # face detection and create bbox
+            vis_frame_w_overlay, x1 = overlay_vis_bboxes(gpu_thread.frame, gpu_thread.detections)
 
+            if x1 == 0:
+                nodetecting += 1
+                print(nodetecting)
+                if nodetecting > 50:
+                    saveflag = 1
+            else:
+                nodetecting = 0
+                
             # Show
             cv2.imshow(VIS_WIN_NAME, vis_frame_w_overlay)
-            ###cv2.imshow(IR_WIN_NAME, ir_frame_w_overlay)
+
             key = cv2.waitKey(1) & 0xFF
 
             # Save frames
-            executor.submit(cv2.imwrite, f"{LOG_DIR}/frames/vis/{i:05d}.jpg", vis_frame_w_overlay)
-            ###executor.submit(cv2.imwrite, f"{LOG_DIR}/frames/ir/{i:05d}.jpg", ir_frame_w_overlay)
-            
             # if the `q` key was pressed in the cv2 window, break from the loop
+	    # if the 's' key was pressed in the cv2 window, save iamges and save datas to mysql DB
             if key == ord("q"):
                 break
-
+            if saveflag == 1 and nodetecting == 0:
+                save_img(url)
+                saveflag = 0
             main_latency =  time.monotonic() - time_start
-            print(f"GPU thread latency={gpu_thread._delay:.2f}    Main thread latency={1000 * main_latency:.2f}")
-            ###print(f"GPU thread latency={gpu_thread._delay:.2f}    IR thread latency={ir_thread.latency:.2f}      Main thread latency={1000 * main_latency:.2f}")
             
             time.sleep(max(0, MAIN_MIN_LATENCY - main_latency))
 
     finally:
         exit_handler()
-
-
-
-
